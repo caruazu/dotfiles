@@ -1,0 +1,115 @@
+#!/bin/bash
+
+# Cores
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[1;34m'
+NC='\033[0m' # Sem cor
+BOLD='\033[1m'
+
+# Iniciando
+echo -e "${BLUE}Front-end         "
+echo -e "                         "
+echo -e "${BOLD}$BOT_NAME: ${NC}iniciando o deploy do ${BOLD}FrontEnd${NC}"
+
+
+# Carrega variáveis do arquivo .env
+if [ -f "../sistema-svo-pra-infrastructure/.env" ]; then
+    export $(grep -v '^#' ../sistema-svo-pra-infrastructure/.env | xargs)
+else
+    echo "${BOLD}$BOT_NAME: ${RED}Arquivo .env não encontrado!${NC}"
+    exit 1
+fi
+
+VM_HOME_PATH="/home/$VM_USER/$APP_NAME"  # Diretório temporário na VM
+VM_FINAL_PATH="/var/www/html/$APP_NAME" # Diretório final na VM
+LOCAL_BUILD_PATH="dist/$APP_NAME"  # Caminho de build local
+ARCHIVE_NAME="$APP_NAME.tar.gz"  # Nome do arquivo de compressão
+
+# Começando as fases do deploy
+
+
+# Passo 1
+echo -e "${BOLD}$BOT_NAME: ${NC}Instalando dependencias e o Angular CLI..${NC}"
+npm install
+npm install -g @angular/cli
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Dependências e Angular CLI instalados com sucesso!${NC}"
+
+
+# Passo 2
+echo -e "${BOLD}$BOT_NAME: ${NC}Iniciando build da aplicação Angular...${NC}"
+ng build --configuration production
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Build concluído com sucesso!${NC}"
+
+
+# Passo 3
+echo -e "${BOLD}$BOT_NAME: ${NC}Compactando arquivos de build...${NC}"
+tar -czf $ARCHIVE_NAME -C $LOCAL_BUILD_PATH .
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Arquivos compactados com sucesso!${NC}"
+
+
+
+if ! command -v sshpass &> /dev/null
+then
+    echo "${BOLD}$BOT_NAME: ${RED}sshpass não está instalado. Instale-o usando sudo apt-get install sshpass.${NC}"
+    exit 1
+fi
+
+
+# Passo 4
+echo -e "${BOLD}$BOT_NAME: ${NC}Criando diretório temporário na VM...${NC}"
+sshpass -p "$VM_PASS" ssh -p $SSH_PORT $VM_USER@$VM_HOST "mkdir -p $VM_HOME_PATH"
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Diretório temporário criado com sucesso!${NC}"
+
+
+# Passo 5
+echo -e "${BOLD}$BOT_NAME: ${NC}Transferindo arquivo compactado para a VM...${NC}"
+sshpass -p "$VM_PASS" scp -P $SSH_PORT $ARCHIVE_NAME $VM_USER@$VM_HOST:$VM_HOME_PATH
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Arquivo transferido com sucesso!${NC}"
+
+
+# Passo 6
+echo -e "${BOLD}$BOT_NAME: ${NC}Descompactando o arquivo na VM e movendo para o diretório final...${NC}"
+sshpass -p "$VM_PASS" ssh -p $SSH_PORT $VM_USER@$VM_HOST << EOF
+echo "$VM_PASS" | sudo -S tar -xzf $VM_HOME_PATH/$ARCHIVE_NAME -C $VM_HOME_PATH
+echo "$VM_PASS" | sudo -S rm $VM_HOME_PATH/$ARCHIVE_NAME
+echo "$VM_PASS" | sudo -S mkdir -p $VM_FINAL_PATH
+echo "$VM_PASS" | sudo -S rm -rf $VM_FINAL_PATH/*
+echo "$VM_PASS" | sudo -S mv $VM_HOME_PATH/* $VM_FINAL_PATH
+echo "$VM_PASS" | sudo -S rm -r $VM_HOME_PATH
+EOF
+echo -e "\n${BOLD}$BOT_NAME: ${GREEN}Arquivos descompactados e movidos com sucesso!${NC}"
+
+
+# Passo 7: .htaccess
+echo -e "${BOLD}$BOT_NAME: ${NC}Criando o arquivo .htaccess...${NC}"
+HTACCESS_CONTENT="
+<IfModule mod_rewrite.c>
+
+  # Turn the rewrite engine on and set URI base
+  RewriteEngine On
+  RewriteBase /
+
+  # Serve files when they are found
+  RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI} -f [OR]
+  RewriteCond %{DOCUMENT_ROOT}%{REQUEST_URI} -d
+  RewriteRule ^ - [L]
+
+  # When file is not found, serve index.html instead
+  RewriteRule ^ /index.html
+
+</IfModule>"
+sshpass -p "$VM_PASS" ssh -p $SSH_PORT $VM_USER@$VM_HOST << EOF
+echo "$VM_PASS" | sudo -S bash -c 'echo "$HTACCESS_CONTENT" > $VM_FINAL_PATH/.htaccess'
+EOF
+echo -e "\n${BOLD}$BOT_NAME: ${GREEN}Arquivo .htaccess criado com sucesso!${NC}"
+
+# Limpeza
+rm $ARCHIVE_NAME
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Arquivo compactado removido localmente.${NC}"
+
+# Finalização
+echo -e "${BOLD}$BOT_NAME: ${GREEN}Deploy da aplicação concluído com sucesso!${NC}"
+
+# Lembretes
+echo -e "${BOLD}$BOT_NAME: ${RED}não esqueça de reiniciar o apache!${NC}"

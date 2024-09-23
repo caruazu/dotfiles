@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Define o caminho absoluto para o arquivo .env utilizando o atalho ~ para o diretório home do usuário
+ENV_FILE="$HOME/caruazu-scripts/.env"
+
+echo "$ENV_FILE"
+
+# Carrega as variáveis de ambiente do arquivo .env
+if [ -f "$ENV_FILE" ]; then
+  export $(grep -v '^#' "$ENV_FILE" | xargs)
+else
+  echo "Arquivo .env não encontrado!"
+  exit 1
+fi
+
+# Verifica se as variáveis de login e senha estão definidas
+if [ -z "$OPENVPN_USER" ] || [ -z "$OPENVPN_PASSWORD" ]; then
+  echo "Credenciais não encontradas no arquivo .env"
+  exit 1
+fi
+
+# Cria um arquivo temporário para armazenar as credenciais
+AUTH_FILE=$(mktemp)
+echo "$OPENVPN_USER" > "$AUTH_FILE"
+echo "$OPENVPN_PASSWORD" >> "$AUTH_FILE"
+
+# Muda para o diretório /etc/openvpn/server
+cd /etc/openvpn/server || { echo "Falha ao acessar o diretório /etc/openvpn/server"; exit 1; }
+
+# Executa o comando OpenVPN com o arquivo de configuração especificado e o arquivo de autenticação
+sudo openvpn --config vpn-config.ovpn --auth-user-pass "$AUTH_FILE"
+
+# Remove o arquivo temporário após a execução
+rm -f "$AUTH_FILE"
