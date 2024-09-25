@@ -3,8 +3,6 @@
 # Define o caminho absoluto para o arquivo .env utilizando o atalho ~ para o diretório home do usuário
 ENV_FILE="$HOME/caruazu-scripts/.env"
 
-echo "$ENV_FILE"
-
 # Carrega as variáveis de ambiente do arquivo .env
 if [ -f "$ENV_FILE" ]; then
   export $(grep -v '^#' "$ENV_FILE" | xargs)

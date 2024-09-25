@@ -1,0 +1,72 @@
+#!/bin/bash
+
+# Autor: caruazu
+# Data: 2024-09-25
+
+# Habilita a saída em caso de erro
+set -e
+
+# Captura a interrupção do script
+trap 'echo "Interrupção detectada. Finalizando..."; exit 1' SIGINT SIGTERM
+
+# Carrega as credenciais do arquivo .env
+ENV_FILE="$HOME/caruazu-scripts/.env"
+
+# Verifica se o arquivo .env existe
+if [ ! -f "$ENV_FILE" ]; then
+  echo "Erro: Arquivo .env não encontrado em $ENV_FILE"
+  exit 1
+fi
+
+# Carrega as variáveis de ambiente a partir do arquivo .env
+source "$ENV_FILE"
+
+# Verifica se as variáveis necessárias estão definidas
+if [ -z "$DEPLOY_SPRING_SSH_USER" ] || [ -z "$DEPLOY_SPRING_SSH_PASS" ] || [ -z "$DEPLOY_SPRING_SSH_PORT" ] || [ -z "$DEPLOY_SPRING_PROJECT_NAME" ] || [ -z "$DEPLOY_SPRING_REMOTE_HOST" ]; then
+  echo "Erro: Variáveis DEPLOY_SPRING_SSH_USER, DEPLOY_SPRING_SSH_PASS, DEPLOY_SPRING_SSH_PORT, DEPLOY_SPRING_PROJECT_NAME OU DEPLOY_SPRING_REMOTE_HOST não definidas no arquivo .env"
+  exit 1
+fi
+
+REMOTE_HOST="$DEPLOY_SPRING_REMOTE_HOST"
+SSH_USER="$DEPLOY_SPRING_SSH_USER"
+SSH_PASS="$DEPLOY_SPRING_SSH_PASS"
+SSH_PORT="$DEPLOY_SPRING_SSH_PORT"
+PROJECT_NAME="$DEPLOY_SPRING_PROJECT_NAME"
+
+REMOTE_FILE="/home/$SSH_USER/acesso.txt"
+LOCAL_FILE="./$PROJECT_NAME.jar"
+REMOTE_DESTINATION="/home/$SSH_USER/$PROJECT_NAME.jar"
+FINAL_DESTINATION="/opt/$PROJECT_NAME"
+
+
+echo "Conectando à máquina $REMOTE_HOST na porta $SSH_PORT..."
+
+## Passo 1 ##
+
+
+# Verifica se o arquivo app.jar existe no local
+if [ ! -f "$LOCAL_FILE" ]; then
+  echo "Erro: Arquivo $LOCAL_FILE não encontrado no diretório atual."
+  exit 1
+fi
+
+# Move o arquivo app.jar para a máquina remota
+echo "Enviando arquivo $LOCAL_FILE para a máquina remota..."
+sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$LOCAL_FILE" "$SSH_USER@$REMOTE_HOST:$REMOTE_DESTINATION"
+
+
+## Passo 2 ##
+
+
+# Comando para mover o arquivo para outra pasta
+CMD_MOVE_APP=$(cat <<EOF
+  echo '$SSH_PASS' | sudo -S mv $REMOTE_DESTINATION $FINAL_DESTINATION
+EOF
+)
+
+# Move o arquivo para /opt/ com sudo
+echo "Movendo $LOCAL_FILE para $FINAL_DESTINATION..."
+sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER@$REMOTE_HOST" "$CMD_MOVE_APP"
+echo -e "\n"
+
+echo "Processo concluído com sucesso!"
