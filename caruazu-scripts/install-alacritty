@@ -1,0 +1,70 @@
+#!/bin/bash
+
+# This script downloads and installs the latest release of Alacritty on Linux Mint.
+
+# Exit immediately if a command exits with a non-zero status
+set -e
+
+# Variables
+REPO_OWNER="alacritty"
+REPO_NAME="alacritty"
+INSTALL_DIR="/usr/local/bin"
+DESKTOP_ENTRY_DIR="/usr/share/applications"
+ICON_DIR="/usr/share/pixmaps"
+BUILD_DIR="$HOME/alacritty_build"
+
+# Functions
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+suggest_dependency() {
+    echo "Please install '$1' and re-run this script."
+    exit 1
+}
+
+# Check for required commands
+for cmd in git curl tar make; do
+    if ! command_exists "$cmd"; then
+        echo "Command '$cmd' not found."
+        suggest_dependency "$cmd"
+    fi
+done
+
+# Create build directory
+if [ -d "$BUILD_DIR" ]; then
+    echo "Removing existing build directory at $BUILD_DIR"
+    rm -rf "$BUILD_DIR"
+fi
+echo "Creating build directory at $BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+
+cd "$BUILD_DIR"
+
+# Fetch the latest release tag from GitHub API
+echo "Fetching latest release information..."
+LATEST_RELEASE_URL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
+LATEST_TAG=$(curl -s "$LATEST_RELEASE_URL" | grep -Po '"tag_name": "\K.*?(?=")')
+if [ -z "$LATEST_TAG" ]; then
+    echo "Failed to fetch the latest release tag."
+    exit 1
+fi
+echo "Latest release tag is $LATEST_TAG"
+
+# Download source code tarball
+TARBALL_URL="https://github.com/$REPO_OWNER/$REPO_NAME/archive/$LATEST_TAG.tar.gz"
+echo "Downloading source code tarball from $TARBALL_URL"
+curl -L "$TARBALL_URL" -o "$LATEST_TAG.tar.gz"
+
+# Extract tarball
+echo "Extracting source code..."
+tar -xzf "$LATEST_TAG.tar.gz"
+
+# Change to source code directory
+cd "$REPO_NAME-${LATEST_TAG#v}"
+
+# Clean up build directory
+echo "Cleaning up..."
+rm -rf "$BUILD_DIR"
+
+exit 0

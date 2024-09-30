@@ -59,13 +59,13 @@ sshpass -p "$SSH_PASS" scp -P "$SSH_PORT" "$LOCAL_FILE" "$SSH_USER@$REMOTE_HOST:
 # Comando para verificar se o arquivo já existe, mover se não existir, e reiniciar o serviço
 CMD_MOVE_APP=$(cat <<EOF
   if [ -f "$FINAL_DESTINATION" ]; then
-    echo '$SSH_PASS' | sudo -S rm -rf $FINAL_DESTINATION
-    echo -e "\n"
     echo 'O arquivo $FINAL_DESTINATION já existe. Removendo ele.'
+    echo "$SSH_PASS" | sudo -S rm -rf $FINAL_DESTINATION
+    echo -e '\n'
   fi
-    echo '$SSH_PASS' | sudo -S mv $REMOTE_DESTINATION $FINAL_DESTINATION
-    echo -e "\n"
-    echo 'Arquivo movido para $FINAL_DESTINATION'
+    echo 'Movendo arquivo para $FINAL_DESTINATION'
+    echo -e '\n'
+    echo "$SSH_PASS" | sudo -S mv $REMOTE_DESTINATION $FINAL_DESTINATION
 EOF
 )
 
@@ -78,13 +78,13 @@ sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER
 
 # Comando para verificar se o arquivo já existe, mover se não existir, e reiniciar o serviço
 RESTART_SERVICE=$(cat <<EOF
-  echo '$SSH_PASS' | sudo -S systemctl restart sso-gov.service
-  echo -e "\n"
+  echo "$SSH_PASS" | sudo -S systemctl restart "$PROJECT_NAME".service
+  echo -e '\n'
 EOF
 )
 
 # Executa o comando na máquina remota
-echo "reiniciando o serviço sso-gov..."
+echo "reiniciando o serviço $PROJECT_NAME..."
 sshpass -p "$SSH_PASS" ssh -o StrictHostKeyChecking=no -p "$SSH_PORT" "$SSH_USER@$REMOTE_HOST" "$RESTART_SERVICE"
 
 echo "Processo concluído com sucesso!"

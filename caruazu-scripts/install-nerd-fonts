@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=$'\n\t'
+
+# Function to log messages with timestamps
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"
+}
+
+# Prompt for sudo password upfront to minimize prompts
+if ! sudo -v; then
+    log "You need sudo privileges to run this script."
+    exit 1
+fi
+
+# Check for 'curl'
+if ! command -v curl &> /dev/null; then
+    log "curl is required but not installed. Please install 'curl' and try again."
+    exit 1
+fi
+
+# Check for 'jq'
+if ! command -v jq &> /dev/null; then
+    log "jq is required but not installed. Please install 'jq' and try again."
+    exit 1
+fi
+
+# Variables
+FONT_DIR="/usr/share/fonts/nerd-fonts"
+TEMP_DIR=$(mktemp -d)
+
+# Cleanup function to remove temporary files
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
+# Create font directory if it doesn't exist
+if [[ ! -d "$FONT_DIR" ]]; then
+    log "Creating font directory at $FONT_DIR..."
+    sudo mkdir -p "$FONT_DIR"
+fi
+
+# Fetch the latest release data from GitHub
+log "Fetching the latest Nerd Fonts release data..."
+LATEST_RELEASE_JSON=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest)
+
+# Array of font names to install
+FONT_NAMES=("RobotoMono.tar.xz" "UbuntuMono.tar.xz")
+
+for FONT_ARCHIVE in "${FONT_NAMES[@]}"; do
+    # Extract the download URL for the font
+    ASSET_URL=$(echo "$LATEST_RELEASE_JSON" | jq -r --arg FONT_ARCHIVE "$FONT_ARCHIVE" '.assets[] | select(.name == $FONT_ARCHIVE) | .browser_download_url')
+
+    if [[ -z "$ASSET_URL" ]]; then
+        log "$FONT_ARCHIVE not found in the latest release."
+        continue
+    fi
+
+    # Download and install the font
+    log "Downloading $FONT_ARCHIVE..."
+    curl -L -o "$TEMP_DIR/$FONT_ARCHIVE" "$ASSET_URL"
+
+    log "Extracting $FONT_ARCHIVE..."
+    tar -xf "$TEMP_DIR/$FONT_ARCHIVE" -C "$TEMP_DIR"
+
+    # Find and install font files
+    FONT_FILES=$(find "$TEMP_DIR" -type f \( -iname "*.ttf" -o -iname "*.otf" \))
+    for FONT_FILE in $FONT_FILES; do
+        FONT_NAME=$(basename "$FONT_FILE")
+        if [[ -f "$FONT_DIR/$FONT_NAME" ]]; then
+            log "Removing existing font $FONT_NAME..."
+            sudo rm -f "$FONT_DIR/$FONT_NAME"
+        fi
+        log "Installing $FONT_NAME..."
+        sudo cp "$FONT_FILE" "$FONT_DIR"
+    done
+
+    # Clean up extracted files to avoid conflicts in the next iteration
+    rm -rf "$TEMP_DIR"/*
+done
+
+# Update the font cache
+log "Updating font cache..."
+sudo fc-cache -f -v
+
+log "Nerd Fonts installation complete."
