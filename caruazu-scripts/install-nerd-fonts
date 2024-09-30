@@ -13,17 +13,16 @@ if ! sudo -v; then
     exit 1
 fi
 
-# Check for 'curl'
-if ! command -v curl &> /dev/null; then
-    log "curl is required but not installed. Please install 'curl' and try again."
-    exit 1
-fi
+# Keep-alive: update existing sudo time stamp if set, otherwise do nothing.
+while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-# Check for 'jq'
-if ! command -v jq &> /dev/null; then
-    log "jq is required but not installed. Please install 'jq' and try again."
-    exit 1
-fi
+# Check for required commands
+for cmd in curl jq unzip; do
+    if ! command -v "$cmd" &> /dev/null; then
+        log "$cmd is required but not installed. Please install '$cmd' and try again."
+        exit 1
+    fi
+done
 
 # Variables
 FONT_DIR="/usr/share/fonts/nerd-fonts"
@@ -46,7 +45,7 @@ log "Fetching the latest Nerd Fonts release data..."
 LATEST_RELEASE_JSON=$(curl -s https://api.github.com/repos/ryanoasis/nerd-fonts/releases/latest)
 
 # Array of font names to install
-FONT_NAMES=("RobotoMono.tar.xz" "UbuntuMono.tar.xz")
+FONT_NAMES=("RobotoMono.zip" "UbuntuMono.zip")
 
 for FONT_ARCHIVE in "${FONT_NAMES[@]}"; do
     # Extract the download URL for the font
@@ -59,14 +58,17 @@ for FONT_ARCHIVE in "${FONT_NAMES[@]}"; do
 
     # Download and install the font
     log "Downloading $FONT_ARCHIVE..."
-    curl -L -o "$TEMP_DIR/$FONT_ARCHIVE" "$ASSET_URL"
+    if ! curl -L -o "$TEMP_DIR/$FONT_ARCHIVE" "$ASSET_URL"; then
+        log "Failed to download $FONT_ARCHIVE."
+        continue
+    fi
 
+    # Extract the font archive
     log "Extracting $FONT_ARCHIVE..."
-    tar -xf "$TEMP_DIR/$FONT_ARCHIVE" -C "$TEMP_DIR"
+    unzip -q "$TEMP_DIR/$FONT_ARCHIVE" -d "$TEMP_DIR"
 
     # Find and install font files
-    FONT_FILES=$(find "$TEMP_DIR" -type f \( -iname "*.ttf" -o -iname "*.otf" \))
-    for FONT_FILE in $FONT_FILES; do
+    while IFS= read -r -d '' FONT_FILE; do
         FONT_NAME=$(basename "$FONT_FILE")
         if [[ -f "$FONT_DIR/$FONT_NAME" ]]; then
             log "Removing existing font $FONT_NAME..."
@@ -74,7 +76,7 @@ for FONT_ARCHIVE in "${FONT_NAMES[@]}"; do
         fi
         log "Installing $FONT_NAME..."
         sudo cp "$FONT_FILE" "$FONT_DIR"
-    done
+    done < <(find "$TEMP_DIR" -type f \( -iname "*.ttf" -o -iname "*.otf" \) -print0)
 
     # Clean up extracted files to avoid conflicts in the next iteration
     rm -rf "$TEMP_DIR"/*

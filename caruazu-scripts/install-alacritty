@@ -1,70 +1,176 @@
 #!/bin/bash
-
-# This script downloads and installs the latest release of Alacritty on Linux Mint.
-
-# Exit immediately if a command exits with a non-zero status
-set -e
+set -euo pipefail
 
 # Variables
-REPO_OWNER="alacritty"
-REPO_NAME="alacritty"
-INSTALL_DIR="/usr/local/bin"
-DESKTOP_ENTRY_DIR="/usr/share/applications"
-ICON_DIR="/usr/share/pixmaps"
-BUILD_DIR="$HOME/alacritty_build"
+BUILD_DIR="$HOME/alacritty-build"
+MISSING_DEPENDENCIES=0
 
-# Functions
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-suggest_dependency() {
-    echo "Please install '$1' and re-run this script."
-    exit 1
-}
-
-# Check for required commands
-for cmd in git curl tar make; do
-    if ! command_exists "$cmd"; then
-        echo "Command '$cmd' not found."
-        suggest_dependency "$cmd"
+# Function to check for required commands
+check_command() {
+    if ! command -v "$1" &> /dev/null; then
+        echo "Command '$1' not found. Please install it."
+        MISSING_DEPENDENCIES=1
     fi
+}
+
+# Function to check for required packages
+check_package() {
+    if ! dpkg -s "$1" &> /dev/null; then
+        echo "Package '$1' is not installed. Please install it."
+        MISSING_DEPENDENCIES=1
+    fi
+}
+
+echo "Checking for required commands..."
+
+# List of required commands
+REQUIRED_CMDS=("cargo" "rustc" "curl" "tar" "sudo" "tic" "desktop-file-install" "update-desktop-database" "scdoc" "gzip")
+
+for cmd in "${REQUIRED_CMDS[@]}"; do
+    check_command "$cmd"
 done
 
-# Create build directory
+echo "Checking for required packages..."
+
+# List of required packages
+REQUIRED_PKGS=("cmake" "pkg-config" "libfreetype6-dev" "libfontconfig1-dev" "libxcb-xfixes0-dev" "libxkbcommon-dev" "desktop-file-utils" "ncurses-bin" "gzip" "scdoc")
+
+for pkg in "${REQUIRED_PKGS[@]}"; do
+    check_package "$pkg"
+done
+
+if [ "$MISSING_DEPENDENCIES" -ne 0 ]; then
+    echo "Please install the missing dependencies and re-run the script."
+    exit 1
+fi
+
+echo "All dependencies are satisfied."
+
+# Remove existing build directory if it exists
 if [ -d "$BUILD_DIR" ]; then
     echo "Removing existing build directory at $BUILD_DIR"
     rm -rf "$BUILD_DIR"
 fi
-echo "Creating build directory at $BUILD_DIR"
-mkdir -p "$BUILD_DIR"
 
+# Create build directory
+mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Fetch the latest release tag from GitHub API
-echo "Fetching latest release information..."
-LATEST_RELEASE_URL="https://api.github.com/repos/$REPO_OWNER/$REPO_NAME/releases/latest"
-LATEST_TAG=$(curl -s "$LATEST_RELEASE_URL" | grep -Po '"tag_name": "\K.*?(?=")')
-if [ -z "$LATEST_TAG" ]; then
-    echo "Failed to fetch the latest release tag."
+echo "Fetching the latest release information..."
+
+# Get the latest release JSON from GitHub API
+LATEST_RELEASE_JSON=$(curl -s https://api.github.com/repos/alacritty/alacritty/releases/latest)
+
+# Extract tarball URL
+TARBALL_URL=$(echo "$LATEST_RELEASE_JSON" | grep '"tarball_url":' | head -n1 | cut -d '"' -f4)
+
+if [ -z "$TARBALL_URL" ]; then
+    echo "Failed to retrieve the tarball URL."
     exit 1
 fi
-echo "Latest release tag is $LATEST_TAG"
 
-# Download source code tarball
-TARBALL_URL="https://github.com/$REPO_OWNER/$REPO_NAME/archive/$LATEST_TAG.tar.gz"
-echo "Downloading source code tarball from $TARBALL_URL"
-curl -L "$TARBALL_URL" -o "$LATEST_TAG.tar.gz"
+echo "Downloading the source code tarball..."
 
-# Extract tarball
-echo "Extracting source code..."
-tar -xzf "$LATEST_TAG.tar.gz"
+# Download the tarball
+curl -L "$TARBALL_URL" -o alacritty.tar.gz
 
-# Change to source code directory
-cd "$REPO_NAME-${LATEST_TAG#v}"
+if [ ! -f alacritty.tar.gz ]; then
+    echo "Failed to download the source code tarball."
+    exit 1
+fi
 
-# Clean up build directory
-echo "Cleaning up..."
+echo "Extracting the source code..."
+
+# Remove existing source directory if it exists
+if [ -d "alacritty-source" ]; then
+    echo "Removing existing source directory."
+    rm -rf alacritty-source
+fi
+
+# Create a fixed directory for extraction
+mkdir alacritty-source
+
+# Extract the tarball into the fixed directory
+tar -xzf alacritty.tar.gz --strip-components=1 -C alacritty-source
+
+cd alacritty-source
+
+echo "Building Alacritty..."
+
+# Compile Alacritty
+cargo build --release
+
+if [ ! -f target/release/alacritty ]; then
+    echo "Build failed."
+    exit 1
+fi
+
+echo "Alacritty built successfully."
+
+echo "Installing Alacritty..."
+
+# Ensure /usr/local/bin exists
+sudo mkdir -p /usr/local/bin
+
+# Install the Alacritty binary, overwriting if it exists
+sudo cp -f target/release/alacritty /usr/local/bin
+
+# Check if /usr/local/bin is in PATH
+if ! echo "$PATH" | grep -q "/usr/local/bin"; then
+    echo "Warning: /usr/local/bin is not in your PATH. You may need to add it."
+fi
+
+echo "Installing terminfo..."
+
+# Ensure /usr/share/terminfo exists
+sudo mkdir -p /usr/share/terminfo
+
+# Install terminfo, overwriting if necessary
+sudo tic -x -o /usr/share/terminfo extra/alacritty.info
+
+echo "Installing desktop entry and icon..."
+
+# Ensure directories exist
+sudo mkdir -p /usr/share/pixmaps
+sudo mkdir -p /usr/share/applications
+
+# Install the icon, overwriting if it exists
+sudo cp -f extra/logo/alacritty-term.svg /usr/share/pixmaps/Alacritty.svg
+
+# Adjust desktop file paths
+sed -i "s|Exec=alacritty|Exec=/usr/local/bin/alacritty|g" extra/linux/Alacritty.desktop
+sed -i "s|Icon=alacritty|Icon=/usr/share/pixmaps/Alacritty.svg|g" extra/linux/Alacritty.desktop
+
+# Install the desktop entry, overwriting if it exists
+sudo desktop-file-install --rebuild-mime-info-cache --delete-original --dir=/usr/share/applications extra/linux/Alacritty.desktop
+
+sudo update-desktop-database
+
+echo "Installing manual pages..."
+
+# Ensure man directories exist
+sudo mkdir -p /usr/local/share/man/man1
+sudo mkdir -p /usr/local/share/man/man5
+
+# Install the manual pages using scdoc and gzip, overwriting if they exist
+sudo sh -c "scdoc < extra/man/alacritty.1.scd | gzip -c > /usr/local/share/man/man1/alacritty.1.gz"
+sudo sh -c "scdoc < extra/man/alacritty-msg.1.scd | gzip -c > /usr/local/share/man/man1/alacritty-msg.1.gz"
+sudo sh -c "scdoc < extra/man/alacritty.5.scd | gzip -c > /usr/local/share/man/man5/alacritty.5.gz"
+sudo sh -c "scdoc < extra/man/alacritty-bindings.5.scd | gzip -c > /usr/local/share/man/man5/alacritty-bindings.5.gz"
+
+echo "Installing bash completions..."
+
+# Ensure bash completions directory exists
+sudo mkdir -p /usr/share/bash-completion/completions
+
+# Install bash completions, overwriting if they exist
+sudo cp -f extra/completions/alacritty.bash /usr/share/bash-completion/completions/alacritty
+
+# Clean up the build directory
+echo "Cleaning up build directory at $BUILD_DIR"
 rm -rf "$BUILD_DIR"
 
-exit 0
+echo "Build directory has been cleaned up."
+
+
+echo "Alacritty has been installed successfully."
